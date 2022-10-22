@@ -17,21 +17,36 @@ pte_t entry_pgtable[NPTENTRIES];
 // related to linking and static initializers, we use "x + PTE_P"
 // here, rather than the more standard "x | PTE_P".  Everywhere else
 // you should use "|" to combine flags.
+
+//这个是强制对其的，也就是一个元素的占用空间的大小必须是这么大
+
+//代表有1024个页目录项，每个页目录项对应一个页表的起始地址,每个页表包含1024个页的起始地址，一个页的大小是4kB，0x1000
+//所以一个页表就能够表示4M的内存，一个页目录可以表示4GB的内存
+//4MB * 1024 = 4GB
+
+//这里的页目录中的第0项和第KERNBASE>>PDXSHIFT项中的页表的地址都给写死了，都是指向entry_pgtable这个页表
+//然后entry_pgtable这个页表也是被写死了，里面就是1024个页，就是对应的就是第0页到第1024页
+//所以这里我们知道了虚拟地址的[0, 4MB)和[KERNBASE, KERNBASE+4MB)都别映射到了物理地址的[0, 4MB)处
 __attribute__((__aligned__(PGSIZE)))
 pde_t entry_pgdir[NPDENTRIES] = {
+
 	// Map VA's [0, 4MB) to PA's [0, 4MB)
-	[0]
-		= ((uintptr_t)entry_pgtable - KERNBASE) + PTE_P,
+	//((uintptr_t)entry_pgtable - KERNBASE) 就代表的是这页表的物理地址
+	//为什么要把这个虚拟的0-4M 也要映射到物理的，因为开启分页后，所有的指令的地址都认为是虚拟的，所以要保证当运行bios等程序的时候还是物理地址
+	[0] = ((uintptr_t)entry_pgtable - KERNBASE) + PTE_P,
+
 	// Map VA's [KERNBASE, KERNBASE+4MB) to PA's [0, 4MB)
-	[KERNBASE>>PDXSHIFT]
-		= ((uintptr_t)entry_pgtable - KERNBASE) + PTE_P + PTE_W
+	//将[KERNBASE, KERNBASE+4MB)虚拟地址映射到物理地址的[0, 4MB)
+	[KERNBASE>>PDXSHIFT] = ((uintptr_t)entry_pgtable - KERNBASE) + PTE_P + PTE_W
 };
 
 // Entry 0 of the page table maps to physical page 0, entry 1 to
 // physical page 1, etc.
+//这是一个页表，总共表示了1024个页的起始地址
+//这里直接就全部写死了，这个页表就是第0个页到1023个页，总共占用内存4M
 __attribute__((__aligned__(PGSIZE)))
 pte_t entry_pgtable[NPTENTRIES] = {
-	0x000000 | PTE_P | PTE_W,
+	0x000000 | PTE_P | PTE_W, //或运算 这个代表0x00000003U ;每一项代表一个页的起始地址，低三位不取
 	0x001000 | PTE_P | PTE_W,
 	0x002000 | PTE_P | PTE_W,
 	0x003000 | PTE_P | PTE_W,
