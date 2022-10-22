@@ -54,6 +54,8 @@ entry:
 
 	# Load the physical address of entry_pgdir into cr3.  entry_pgdir
 	# is defined in entrypgdir.c.
+	# 通过反汇编我们知道了$(RELOC(entry_pgdir)) = $0x111000
+	# 也就是我们的页目录表的地址是$0x111000，这个就是物理地址
 	movl	$(RELOC(entry_pgdir)), %eax
 	movl	%eax, %cr3
 	# Turn on paging.
