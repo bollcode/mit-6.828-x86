@@ -12,6 +12,9 @@
 #include <kern/trap.h>
 
 
+//从entry.s 文件跳转过来，在那里我们完成了开启分页模式，设置好了页表，并把页目录表地址给了cr3寄存器，后面地址的映射交给MMU
+//现在就开始初始化一些东西
+
 void
 i386_init(void)
 {
@@ -45,6 +48,10 @@ i386_init(void)
 
 	// We only have one user environment for now, so just run it.
 	env_run(&envs[0]);
+
+	// // Drop into the kernel monitor.
+	// while (1)
+	// 	monitor(NULL);
 }
 
 
