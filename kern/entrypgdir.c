@@ -37,6 +37,7 @@ pde_t entry_pgdir[NPDENTRIES] = {
 
 	// Map VA's [KERNBASE, KERNBASE+4MB) to PA's [0, 4MB)
 	//将[KERNBASE, KERNBASE+4MB)虚拟地址映射到物理地址的[0, 4MB)
+	//右移22位是因为，我们一般用32位虚拟地址的高10位作为页目录表项的索引
 	[KERNBASE>>PDXSHIFT] = ((uintptr_t)entry_pgtable - KERNBASE) + PTE_P + PTE_W
 };
 

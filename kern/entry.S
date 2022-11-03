@@ -37,7 +37,11 @@
 # virtual memory when the bootloader enters this code, we need the
 # bootloader to jump to the *physical* address of the entry point.
 .globl		_start
+# 因为还没有开启分页，所以要用RELOC来映射地址
 _start = RELOC(entry)
+
+
+# 我们现在正式进入内核了，下面就是内核的程序。之前的bootloader程序已经任务完成。
 
 .globl entry
 entry:
@@ -54,12 +58,16 @@ entry:
 
 	# Load the physical address of entry_pgdir into cr3.  entry_pgdir
 	# is defined in entrypgdir.c.
-	# 通过反汇编我们知道了$(RELOC(entry_pgdir)) = $0x111000
-	# 也就是我们的页目录表的地址是$0x111000，这个就是物理地址
-	movl	$(RELOC(entry_pgdir)), %eax
+	# 通过反汇编我们知道了$(RELOC(entry_pgdir)) = $0x111000   entry_pgdir在0xf0111000
+	# 也就是我们的页目录表的地址是$0x111000，这个就是物理地址 ，这个时候还没有开启分页模式，所以使用RELOC来映射物理地址
+
+	# 取出页目录表的地址，并放进cr3寄存器中 这个时候我们就设定好了页目录表
+	movl	$(RELOC(entry_pgdir)), %eax  
 	movl	%eax, %cr3
-	# Turn on paging.
-	movl	%cr0, %eax
+	# Turn on paging. 
+	# 开启分页模式，这个时候指令的地址都是虚拟地址了，需要进行映射，映射的过程交给MMU来完成，
+	# 因为我们已经设置好了页目录表和页表，并把页目录表的地址给了cr03，MMU会自动将寻址时的地址转化为对应的物理地址，然后交给总线去寻址
+	movl	%cr0, %eax  
 	orl	$(CR0_PE|CR0_PG|CR0_WP), %eax
 	movl	%eax, %cr0
 
@@ -70,14 +78,20 @@ entry:
 	jmp	*%eax
 relocated:
 
+
+	# 从这里开始我们就正式进入了分页模式
+
 	# Clear the frame pointer register (EBP)
 	# so that once we get into debugging C code,
 	# stack backtraces will be terminated properly.
 	movl	$0x0,%ebp			# nuke frame pointer
 
-	# Set the stack pointer
+	# Set the stack pointer 
+	# 通过反汇编我们知道 0xf0110000 是栈顶
 	movl	$(bootstacktop),%esp
 
+
+	# 从这里我们就进入了C语言代码
 	# now to C code
 	call	i386_init
 

@@ -15,7 +15,7 @@ start:
   cli                         # Disable interrupts
   cld                         # String operations increment
 
-  # Set up the important data segment registers (DS, ES, SS).
+  # Set up the important data segment registers (DS, ES, SS). //将各种段寄存器清零
   xorw    %ax,%ax             # Segment number zero
   movw    %ax,%ds             # -> Data Segment
   movw    %ax,%es             # -> Extra Segment
@@ -46,8 +46,8 @@ seta20.2:
   # identical to their physical addresses, so that the 
   # effective memory map does not change during the switch.
   lgdt    gdtdesc
-  movl    %cr0, %eax
-  orl     $CR0_PE_ON, %eax
+  movl    %cr0, %eax    #cr0 是控制寄存器，可以用来打开保护模式
+  orl     $CR0_PE_ON, %eax  # 这里完成对PE位置1，打开保护模式
   movl    %eax, %cr0
   
   # Jump to next instruction, but in 32-bit code segment.
@@ -64,7 +64,7 @@ protcseg:
   movw    %ax, %gs                # -> GS
   movw    %ax, %ss                # -> SS: Stack Segment
   
-  # Set up the stack pointer and call into C.
+  # Set up the stack pointer and call into C.   //设置栈的栈顶指针，就是0x7c00 ，因为栈是向下拓展的，所以选这个作为栈顶
   movl    $start, %esp
   call bootmain
 
@@ -76,10 +76,11 @@ spin:
 .p2align 2                                # force 4 byte alignment
 gdt:
   SEG_NULL				# null seg
-  SEG(STA_X|STA_R, 0x0, 0xffffffff)	# code seg
-  SEG(STA_W, 0x0, 0xffffffff)	        # data seg
+  SEG(STA_X|STA_R, 0x0, 0xffffffff)	# code seg   在这个位置设置代码段，每个段是8个字节
+  SEG(STA_W, 0x0, 0xffffffff)	        # data seg  在这个位置设置数据段
 
 gdtdesc:
-  .word   0x17                            # sizeof(gdt) - 1
-  .long   gdt                             # address gdt
+  .word   0x17                            # sizeof(gdt) - 1   在这里放一个字(2字节)，就是gdt大小
+  .long   gdt                             # address gdt       在这里放一个long字(4字节)，就是gdt的地址  总共占据6字节，
+                                                               #后面把这个放到了gdtr寄存器中
 

@@ -9,7 +9,7 @@
         "name": "kernel-debug",
         "type": "cppdbg",
         "request": "launch",
-        "miDebuggerServerAddress": "127.0.0.1:26000",
+        "miDebuggerServerAddress": "127.0.0.0:26000",
         "program": "${workspaceFolder}/obj/kern/kernel",
         "args": [],
         "stopAtEntry": false,
