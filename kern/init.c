@@ -18,6 +18,9 @@
 static void boot_aps(void);
 
 
+//从entry.s 文件跳转过来，在那里我们完成了开启分页模式，设置好了页表，并把页目录表地址给了cr3寄存器，后面地址的映射交给MMU
+//现在就开始初始化一些东西
+
 void
 i386_init(void)
 {
@@ -28,11 +31,13 @@ i386_init(void)
 	cprintf("6828 decimal is %o octal!\n", 6828);
 
 	// Lab 2 memory management initialization functions
+	//这个函数构建了一个页表，并将新的页目录表的物理地址赋给cr3
 	mem_init();
-
+	
 	// Lab 3 user environment initialization functions
 	env_init();
 	trap_init();
+
 
 	// Lab 4 multiprocessor initialization functions
 	mp_init();

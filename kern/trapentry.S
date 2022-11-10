@@ -46,11 +46,42 @@
 
 /*
  * Lab 3: Your code here for generating entry points for the different traps.
+ * 这里我们相当于定义了一堆异常或中断处理函数，可以根据名字来进行调用
  */
-
-
+ 
+TRAPHANDLER_NOEC(th0, 0)
+	TRAPHANDLER_NOEC(th1, 1)
+	TRAPHANDLER_NOEC(th3, 3)
+	TRAPHANDLER_NOEC(th4, 4)
+	TRAPHANDLER_NOEC(th5, 5)
+	TRAPHANDLER_NOEC(th6, 6)
+	TRAPHANDLER_NOEC(th7, 7)
+	TRAPHANDLER(th8, 8)
+	TRAPHANDLER_NOEC(th9, 9)
+	TRAPHANDLER(th10, 10)
+	TRAPHANDLER(th11, 11)
+	TRAPHANDLER(th12, 12)
+	TRAPHANDLER(th13, 13)
+	TRAPHANDLER(th14, 14)
+	TRAPHANDLER_NOEC(th16, 16)
+	//将系统调用的对应的程序名和中断号配置好
+	TRAPHANDLER_NOEC(th_syscall, T_SYSCALL)
 
 /*
  * Lab 3: Your code here for _alltraps
+ * 这里是上面中断处理函数调用的实际处理函数，调用的时候，都在栈中压入了参数num，也就是中断号
+ * ds和es的压入都是根据Trapframe结构顺序压入的
+ * pushal就是将8个通用寄存器压入到栈中
  */
+.globl _alltraps
+_alltraps:
+	pushl %ds;
+	pushl %es;
+	pushal;
+	movw $GD_KD, %ax;
+	movw %ax, %ds;
+	movw %ax, %es;
+	pushl %esp;       //压入trap()的参数tf,%esp指向Trapframe结构的起始地址（这里是将栈中的这段连续的内存当成了Trapframe）
+	call trap;		  // 调用trap函数
+
 
