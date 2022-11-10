@@ -131,7 +131,7 @@ mem_init(void)
 	// Find out how much memory the machine has (npages & npages_basemem).
 	//npages 代表是整个内存的页数  npages_basemem表示的是basemem区域的页数
 	i386_detect_memory();
-
+	cprintf("napges === %u\n",npages);
 	// Remove this line when you're ready to test this function.
 	// panic("mem_init: This function is not finished\n")
 
@@ -141,7 +141,7 @@ mem_init(void)
 	kern_pgdir = (pde_t *) boot_alloc(PGSIZE);
 	//将从kern_pgdir开始的地址后的4096个字节都赋值为0
 	memset(kern_pgdir, 0, PGSIZE);
-
+	cprintf("kern_pgdir == %x",kern_pgdir);
 	//////////////////////////////////////////////////////////////////////
 	// Recursively insert PD in itself as a page table, to form
 	// a virtual page table at virtual address UVPT.
@@ -161,12 +161,13 @@ mem_init(void)
 	// Your code goes here:
 	//维护一个PageInfo的数组，每个元素对应一个空闲页面，通过boot_alloc去申请内存，返回数组的首地址,并将其全部清零
 	pages = (struct PageInfo *) boot_alloc(npages * sizeof(struct PageInfo));
-	memset(pages,0,npages * sizeof(struct PageInfo));
-	
+	memset(pages,0,npages * sizeof(struct PageInfo)); //napges == 0x8000 == 32768 ==> 128M空间
 	//////////////////////////////////////////////////////////////////////
 	// Make 'envs' point to an array of size 'NENV' of 'struct Env'.
 	// LAB 3: Your code here.
-
+	//申请一块空闲内存，给envs数组使用
+	envs = (struct Env*)boot_alloc(sizeof(struct Env)*NENV);
+	memset(envs,0,NENV*sizeof(struct Env));
 	//////////////////////////////////////////////////////////////////////
 	// Now that we've allocated the initial kernel data structures, we set
 	// up the list of free physical pages. Once we've done so, all further
@@ -199,7 +200,7 @@ mem_init(void)
 	//    - the new image at UENVS  -- kernel R, user R
 	//    - envs itself -- kernel RW, user NONE
 	// LAB 3: Your code here.
-
+	boot_map_region(kern_pgdir,UENVS,PTSIZE,PADDR(envs),PTE_U);
 	//////////////////////////////////////////////////////////////////////
 	// Use the physical memory that 'bootstack' refers to as the kernel
 	// stack.  The kernel stack grows down from virtual address KSTACKTOP.
@@ -235,6 +236,8 @@ mem_init(void)
 	//
 	// If the machine reboots at this point, you've probably set up your
 	// kern_pgdir wrong.
+
+	//将cr3寄存器中的地址从entry_pgdir变成了kern_pgdir cr3里面存的是物理地址
 	lcr3(PADDR(kern_pgdir));
 
 	check_page_free_list(0);
@@ -444,7 +447,7 @@ boot_map_region(pde_t *pgdir, uintptr_t va, size_t size, physaddr_t pa, int perm
 	// Fill this function in
 	//获取页表项的地址
 	pte_t *pte =NULL;
-	for(int i=0;i<size;i= i+ PGSIZE){
+	for(int i=0;i<size;i= i + PGSIZE){
 		//根据这个虚拟地址，获取页表项地址，如果不存在或者超过了一个页表的大小，会重新创建
 		pte = pgdir_walk(pgdir,(void *)va,true);
 		//给页表项赋映射的地址
@@ -598,12 +601,23 @@ static uintptr_t user_mem_check_addr;
 //
 // Returns 0 if the user program can access this range of addresses,
 // and -E_FAULT otherwise.
-//
+//主要时看访问的地址是否超过了ULIM，并且看看访问的地址（页表项）是否有访问权限
 int
 user_mem_check(struct Env *env, const void *va, size_t len, int perm)
 {
 	// LAB 3: Your code here.
-
+	cprintf("user_mem_check va: %x,len: %x \n",va,len);
+	uint32_t begin = (uint32_t)ROUNDDOWN(va,PGSIZE);
+	uint32_t end = (uint32_t)ROUNDUP(va+len,PGSIZE);
+	uint32_t i;
+	for(i = begin;i<end;i +=PGSIZE){
+		pte_t *pte = pgdir_walk(env->env_pgdir,(void *)i,0);
+		if(i>ULIM || !pte || !(*pte & PTE_P) || ((*pte & perm) != perm)){
+			user_mem_check_addr = (i<(uint32_t)va? (uint32_t)va:i);
+			return  -E_FAULT;
+		}
+	}
+	cprintf("user_mem_check success va: %x, len: %x\n", va, len);
 	return 0;
 }
 

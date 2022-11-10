@@ -9,7 +9,7 @@
 #include <kern/env.h>
 #include <kern/syscall.h>
 
-static struct Taskstate ts;
+static struct Taskstate ts;  //TSS
 
 /* For debugging, so print_trapframe can distinguish between printing
  * a saved trapframe and printing the current trapframe and print some
@@ -21,11 +21,13 @@ static struct Trapframe *last_tf;
  * shifted function addresses can't be represented in relocation records.)
  */
 struct Gatedesc idt[256] = { { 0 } };
-struct Pseudodesc idt_pd = {
-	sizeof(idt) - 1, (uint32_t) idt
+
+struct Pseudodesc idt_pd = {  //6位IDT表的基址和limit
+	sizeof(idt) - 1, 
+	(uint32_t) idt
 };
 
-
+//trapno代表异常或者中断号
 static const char *trapname(int trapno)
 {
 	static const char * const excnames[] = {
@@ -58,19 +60,56 @@ static const char *trapname(int trapno)
 	return "(unknown trap)";
 }
 
-
+/*初始化IDT中断描述符表*/
 void
 trap_init(void)
 {
+	//全局描述表
 	extern struct Segdesc gdt[];
 
 	// LAB 3: Your code here.
+	//这些函数都是在trapentry.S中定义的，也就是所谓的trapHandler
+	void th0();
+	void th1();
+	void th3();
+	void th4();
+	void th5();
+	void th6();
+	void th7();
+	void th8();
+	void th9();
+	void th10();
+	void th11();
+	void th12();
+	void th13();
+	void th14();
+	void th16();
+	void th_syscall();
+	//下面就是初始化idt表，段选择子都是内核代码段，因为这些函数都是定在内核态的，这里dpl哦有些设置为0，是因为就是在
+	SETGATE(idt[0], 0, GD_KT, th0, 0);		//格式如下：SETGATE(gate, istrap, sel, off, dpl)，定义在inc/mmu.h中
+	SETGATE(idt[1], 0, GD_KT, th1, 0);  //设置idt[1]，段选择子为内核代码段，段内偏移为th1
+	SETGATE(idt[3], 0, GD_KT, th3, 3);
+	SETGATE(idt[4], 0, GD_KT, th4, 0);
+	SETGATE(idt[5], 0, GD_KT, th5, 0);
+	SETGATE(idt[6], 0, GD_KT, th6, 0);
+	SETGATE(idt[7], 0, GD_KT, th7, 0);
+	SETGATE(idt[8], 0, GD_KT, th8, 0);
+	SETGATE(idt[9], 0, GD_KT, th9, 0);
+	SETGATE(idt[10], 0, GD_KT, th10, 0);
+	SETGATE(idt[11], 0, GD_KT, th11, 0);
+	SETGATE(idt[12], 0, GD_KT, th12, 0);
+	SETGATE(idt[13], 0, GD_KT, th13, 0);
+	SETGATE(idt[14], 0, GD_KT, th14, 0);
+	SETGATE(idt[16], 0, GD_KT, th16, 0);
 
+	SETGATE(idt[T_SYSCALL], 0, GD_KT, th_syscall, 3);		//为什么门的DPL要定义为3，参考《x86汇编语言-从实模式到保护模式》p345
+															//我这里猜测的是因为门相当于跳板，用户使用系统调用的时候，肯定要门的特权级低于用户级，只能为3    
 	// Per-CPU setup 
 	trap_init_percpu();
 }
 
 // Initialize and load the per-CPU TSS and IDT
+//每个任务都有自己的TSS，用来存储一些特权级转换时的新栈的地址
 void
 trap_init_percpu(void)
 {
@@ -143,18 +182,37 @@ static void
 trap_dispatch(struct Trapframe *tf)
 {
 	// Handle processor exceptions.
+	//通过他的中断向量号，来确定中断处理函数
 	// LAB 3: Your code here.
-
-	// Unexpected trap: The user process or the kernel has a bug.
-	print_trapframe(tf);
-	if (tf->tf_cs == GD_KT)
-		panic("unhandled trap in kernel");
-	else {
-		env_destroy(curenv);
-		return;
+	switch(tf->tf_trapno){
+		case T_PGFLT:
+			page_fault_handler(tf);
+			break;
+		case T_BRKPT:
+			monitor(tf);
+			break;
+		case T_SYSCALL:
+			tf->tf_regs.reg_eax = syscall(tf->tf_regs.reg_eax, //这个是系统调用号，下面的都是参数
+					tf->tf_regs.reg_edx,
+					tf->tf_regs.reg_ecx,
+					tf->tf_regs.reg_ebx,
+					tf->tf_regs.reg_edi,
+					tf->tf_regs.reg_esi);
+			break;
+		default:
+			// Unexpected trap: The user process or the kernel has a bug.
+			print_trapframe(tf);
+			if (tf->tf_cs == GD_KT)
+				panic("unhandled trap in kernel");
+			else {
+				env_destroy(curenv);
+				return;
+			}
 	}
+	
 }
 
+//在_alltraps中我们调用了这个trap函数，处理异常或中断事件
 void
 trap(struct Trapframe *tf)
 {
@@ -168,7 +226,7 @@ trap(struct Trapframe *tf)
 	assert(!(read_eflags() & FL_IF));
 
 	cprintf("Incoming TRAP frame at %p\n", tf);
-
+	//查看产生中断或异常的程序的特权级
 	if ((tf->tf_cs & 3) == 3) {
 		// Trapped from user mode.
 		assert(curenv);
@@ -200,12 +258,15 @@ page_fault_handler(struct Trapframe *tf)
 	uint32_t fault_va;
 
 	// Read processor's CR2 register to find the faulting address
+	//cr2寄存器是用来存储发生page fault 时的线性地址
 	fault_va = rcr2();
 
 	// Handle kernel-mode page faults.
-
+	if(tf->tf_cs && 0x1 == 0){
+		panic("page_fault int kernel mode,fault address %x/n",fault_va);
+	}
 	// LAB 3: Your code here.
-
+	
 	// We've already handled kernel-mode exceptions, so if we get here,
 	// the page fault happened in user mode.
 
