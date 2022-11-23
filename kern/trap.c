@@ -92,6 +92,13 @@ trap_init(void)
 	void th14();
 	void th16();
 	void th_syscall();
+
+	void timer_handler();
+	void kbd_handler();
+	void serial_handler();
+	void spurious_handler();
+	void ide_handler();
+	void error_handler();
 	//下面就是初始化idt表，段选择子都是内核代码段，因为这些函数都是定在内核态的，这里dpl哦有些设置为0，是因为就是在
 	SETGATE(idt[0], 0, GD_KT, th0, 0);		//格式如下：SETGATE(gate, istrap, sel, off, dpl)，定义在inc/mmu.h中
 	SETGATE(idt[1], 0, GD_KT, th1, 0);  //设置idt[1]，段选择子为内核代码段，段内偏移为th1
@@ -111,12 +118,19 @@ trap_init(void)
 
 	SETGATE(idt[T_SYSCALL], 0, GD_KT, th_syscall, 3);		//为什么门的DPL要定义为3，参考《x86汇编语言-从实模式到保护模式》p345
 															//我这里猜测的是因为门相当于跳板，用户使用系统调用的时候，肯定要门的特权级低于用户级，只能为3    
+	// IRQ
+	SETGATE(idt[IRQ_OFFSET + IRQ_TIMER],    0, GD_KT, timer_handler, 0);
+	SETGATE(idt[IRQ_OFFSET + IRQ_KBD],      0, GD_KT, kbd_handler,     0);
+	SETGATE(idt[IRQ_OFFSET + IRQ_SERIAL],   0, GD_KT, serial_handler,  0);
+	SETGATE(idt[IRQ_OFFSET + IRQ_SPURIOUS], 0, GD_KT, spurious_handler, 0);
+	SETGATE(idt[IRQ_OFFSET + IRQ_IDE],      0, GD_KT, ide_handler,     0);
+	SETGATE(idt[IRQ_OFFSET + IRQ_ERROR],    0, GD_KT, error_handler,   0);
 	// Per-CPU setup 
 	trap_init_percpu();
 }
 
 // Initialize and load the per-CPU TSS and IDT
-//每个任务都有自己的TSS，用来存储一些特权级转换时的新栈的地址
+//每个CPU都有自己的TSS，用来存储一些特权级转换时的新栈的地址
 void
 trap_init_percpu(void)
 {
@@ -144,21 +158,18 @@ trap_init_percpu(void)
 	// user space on that CPU.
 	//
 	// LAB 4: Your code here:
-
+	thiscpu->cpu_ts.ts_esp0 = KSTACKTOP - cpunum() * (KSTKGAP + KSTKSIZE);
+	thiscpu->cpu_ts.ts_ss0 = GD_KD;
 	// Setup a TSS so that we get the right stack
 	// when we trap to the kernel.
-	ts.ts_esp0 = KSTACKTOP;
-	ts.ts_ss0 = GD_KD;
-	ts.ts_iomb = sizeof(struct Taskstate);
-
+	
 	// Initialize the TSS slot of the gdt.
-	gdt[GD_TSS0 >> 3] = SEG16(STS_T32A, (uint32_t) (&ts),
-					sizeof(struct Taskstate) - 1, 0);
-	gdt[GD_TSS0 >> 3].sd_s = 0;
+	gdt[(GD_TSS0 >> 3)+cpunum()] = SEG16(STS_T32A, (uint32_t) (&thiscpu->cpu_ts),sizeof(struct Taskstate) - 1, 0);
+	gdt[(GD_TSS0 >> 3)+cpunum()].sd_s = 0;
 
 	// Load the TSS selector (like other segment selectors, the
 	// bottom three bits are special; we leave them 0)
-	ltr(GD_TSS0);
+	ltr(GD_TSS0 + sizeof(struct Segdesc) * cpunum());
 
 	// Load the IDT
 	lidt(&idt_pd);
@@ -210,6 +221,7 @@ print_regs(struct PushRegs *regs)
 	cprintf("  eax  0x%08x\n", regs->reg_eax);
 }
 
+//根据中断号来执行相应的中断处理程序
 static void
 trap_dispatch(struct Trapframe *tf)
 {
@@ -248,6 +260,10 @@ trap_dispatch(struct Trapframe *tf)
 					tf->tf_regs.reg_edi,
 					tf->tf_regs.reg_esi);
 			break;
+		case IRQ_OFFSET + IRQ_TIMER:
+			lapic_eoi();  //设置中断响应
+			sched_yield(); //进程调度
+			return;
 		default:
 			// Unexpected trap: The user process or the kernel has a bug.
 			print_trapframe(tf);
@@ -267,7 +283,7 @@ trap(struct Trapframe *tf)
 {
 	// The environment may have set DF and some versions
 	// of GCC rely on DF being clear
-	asm volatile("cld" ::: "cc");
+	asm volatile("cld" ::: "cc"); //cld指令功能: 将标志寄存器flag的方向标志位df清零
 
 	// Halt the CPU if some other CPU has called panic()
 	extern char *panicstr;
@@ -282,8 +298,9 @@ trap(struct Trapframe *tf)
 	// fails, DO NOT be tempted to fix it by inserting a "cli" in
 	// the interrupt path.
 	assert(!(read_eflags() & FL_IF));
-
-	cprintf("Incoming TRAP frame at %p\n", tf);
+	// cprintf("this trap num ========%x",tf->tf_trapno);
+	// cprintf(" this tf->tf_cs = %x",tf->tf_cs);
+	// cprintf("Incoming TRAP frame at %p\n", tf);
 	//查看产生中断或异常的程序的特权级
 
 	if ((tf->tf_cs & 3) == 3) {
@@ -291,6 +308,7 @@ trap(struct Trapframe *tf)
 		// Acquire the big kernel lock before doing any
 		// serious kernel work.
 		// LAB 4: Your code here.
+		lock_kernel();
 		assert(curenv);
 
 		// Garbage collect if current enviroment is a zombie
@@ -324,7 +342,8 @@ trap(struct Trapframe *tf)
 		sched_yield();
 }
 
-
+//这个tf是在内核栈中的，保存了一些进程进入中断时的一些信息
+//这个函数时页面异常处理程序，好像是通过UTrapframe进行直接中断返回，而不是从Tramframe回去的（这一点需要关注）
 void
 page_fault_handler(struct Trapframe *tf)
 {
@@ -333,13 +352,13 @@ page_fault_handler(struct Trapframe *tf)
 	// Read processor's CR2 register to find the faulting address
 	//cr2寄存器是用来存储发生page fault 时的线性地址
 	fault_va = rcr2();
-
+	// panic("page_fault in kernel mode, fault address %d\n", fault_va);
 	// Handle kernel-mode page faults.
-	if(tf->tf_cs && 0x1 == 0){
-		panic("page_fault int kernel mode,fault address %x/n",fault_va);
-	}
+
 	// LAB 3: Your code here.
-	
+	if((tf->tf_cs & 0x3) == 0) {
+        panic("page_fault in kernel mode, fault address %d\n", fault_va);
+    }
 	// We've already handled kernel-mode exceptions, so if we get here,
 	// the page fault happened in user mode.
 
@@ -373,7 +392,33 @@ page_fault_handler(struct Trapframe *tf)
 	//   (the 'tf' variable points at 'curenv->env_tf').
 
 	// LAB 4: Your code here.
+	struct UTrapframe *utf;
+	if(curenv->env_pgfault_upcall){
+		//这一步是判断是不是之前已经在异常栈中了，（也就是上面说的递归陷入了）
+		//如果之前没有在异常栈中，那么UTrapframe结构从UXSTACKTOP这里开始
+		//如果之前在异常栈中，那么就紧接着一个UTrapframe 再加一字节空位 开始
+		//也就是这里的stacktop位置
+		if (UXSTACKTOP - PGSIZE <= tf->tf_esp && tf->tf_esp <= UXSTACKTOP - 1)
+            utf = (struct UTrapframe *)(tf->tf_esp - sizeof(struct UTrapframe) - 4);
+        else
+            utf = (struct UTrapframe *)(UXSTACKTOP - sizeof(struct UTrapframe));
+		user_mem_assert(curenv, (void *)utf, sizeof(struct UTrapframe), PTE_U | PTE_W);
 
+		//初始化这个异常栈，直接从这里回去了用户模式，所以要用tf中的值来初始化utf
+		utf->utf_fault_va = fault_va;
+		utf->utf_err = tf->tf_err;
+		utf->utf_regs = tf->tf_regs;
+		utf->utf_eflags = tf->tf_eflags;
+		utf->utf_eip = tf->tf_eip;   //这个tf_eip应该是用户程序发生中断时的eip
+		utf->utf_esp = tf->tf_esp;   //这个tf_esp应该是用户的用户栈esp          ////UXSTACKTOP栈上需要保存发生缺页异常时的%esp和%eip
+
+		//设置进程eip指向页异常用户处理程序
+		tf->tf_eip = (uint32_t)curenv->env_pgfault_upcall;  //这个会在执行env_pop_tf这个函数的时候，开开始执行这个函数，在pfentry.S文件
+		//使用的栈就是UXSTACKTOP，从utf下面开始，
+		tf->tf_esp = (uint32_t)utf;
+		//回到用户模式，经过一系列的pop，记忆最后的iret命令，到了env_pgfault_upcall这里，并且此时栈变成了异常栈utf（并不是用户栈，所以这里完成了从内核栈->异常栈的转换）
+		env_run(curenv); //此时的栈还是内核栈，后面env_pop_tf的pop都是pop的Trapframe结构，然后完成内核栈->异常栈，并执行pgfault_upcall函数
+	}
 	// Destroy the environment that caused the fault.
 	cprintf("[%08x] user fault va %08x ip %08x\n",
 		curenv->env_id, fault_va, tf->tf_eip);

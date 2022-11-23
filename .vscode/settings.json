@@ -1,6 +1,15 @@
 {
     "files.associations": {
         "assert.h": "c",
-        "memlayout.h": "c"
+        "memlayout.h": "c",
+        "x86.h": "c",
+        "types.h": "c",
+        "string.h": "c",
+        "syscall.h": "c",
+        "console.h": "c",
+        "sched.h": "c",
+        "lib.h": "c",
+        "mmu.h": "c",
+        "stdio.h": "c"
     }
 }

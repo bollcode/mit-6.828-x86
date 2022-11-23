@@ -30,14 +30,16 @@
 // code, pointed to by the global variable '_pgfault_handler'.
 
 .text
-.globl _pgfault_upcall
-_pgfault_upcall:
+.globl _pgfault_upcall  //这个函数是从异常栈转换为用户栈，执行env_run()函数的时候，有一个env_pop_tf()函数将eip设置成这个函数入口，栈变成异常栈
+_pgfault_upcall:        //1. 现在我们是在异常栈下，并且是用户态
 	// Call the C page fault handler.
 	pushl %esp			// function argument: pointer to UTF
-	movl _pgfault_handler, %eax
-	call *%eax
+	movl _pgfault_handler, %eax   //这个_pgfault_handler函数就是用户自定义的函数，也是实际的缺页异常处理函数
+	call *%eax           //调用页处理函数
 	addl $4, %esp			// pop function argument
 	
+	//下面就是从异常栈切换到用户栈
+
 	// Now the C page fault handler has returned and you must return
 	// to the trap time state.
 	// Push trap-time %eip onto the trap-time stack.
@@ -63,20 +65,29 @@ _pgfault_upcall:
 	// registers are available for intermediate calculations.  You
 	// may find that you have to rearrange your code in non-obvious
 	// ways as registers become unavailable as scratch space.
-	//
+	//参考这个https://blog.csdn.net/wysiwygo/article/details/104459969
 	// LAB 4: Your code here.
+	movl 48(%esp), %ebp
+    subl $4, %ebp
+    movl %ebp, 48(%esp)
+    movl 40(%esp), %eax
+    movl %eax, (%ebp)
+
 
 	// Restore the trap-time registers.  After you do this, you
 	// can no longer modify any general-purpose registers.
 	// LAB 4: Your code here.
-
+	addl $8,%esp
+	popal
 	// Restore eflags from the stack.  After you do this, you can
 	// no longer use arithmetic operations or anything else that
 	// modifies eflags.
 	// LAB 4: Your code here.
-
+	addl $4,%esp
+	popfl
 	// Switch back to the adjusted trap-time stack.
 	// LAB 4: Your code here.
-
+	popl %esp //这个esp指向的是eip
 	// Return to re-execute the instruction that faulted.
 	// LAB 4: Your code here.
+	ret  //这里十分巧妙， ret会读取esp指向的第一个内容， 也就是我们第一步写入的eip,这样就返回了，这个eip指的是什么呢？进入中断是的地址

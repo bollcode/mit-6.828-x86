@@ -67,6 +67,15 @@ TRAPHANDLER_NOEC(th0, 0)
 	//将系统调用的对应的程序名和中断号配置好
 	TRAPHANDLER_NOEC(th_syscall, T_SYSCALL)
 
+	//外部中断处理函数  IRQS
+TRAPHANDLER_NOEC(timer_handler, IRQ_OFFSET + IRQ_TIMER);
+TRAPHANDLER_NOEC(kbd_handler, IRQ_OFFSET + IRQ_KBD);
+TRAPHANDLER_NOEC(serial_handler, IRQ_OFFSET + IRQ_SERIAL);
+TRAPHANDLER_NOEC(spurious_handler, IRQ_OFFSET + IRQ_SPURIOUS);
+TRAPHANDLER_NOEC(ide_handler, IRQ_OFFSET + IRQ_IDE);
+TRAPHANDLER_NOEC(error_handler, IRQ_OFFSET + IRQ_ERROR);
+
+
 /*
  * Lab 3: Your code here for _alltraps
  * 这里是上面中断处理函数调用的实际处理函数，调用的时候，都在栈中压入了参数num，也就是中断号

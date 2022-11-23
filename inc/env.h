@@ -60,10 +60,15 @@ struct Env {
 	void *env_pgfault_upcall;	// Page fault upcall entry point
 
 	// Lab 4 IPC
-	bool env_ipc_recving;		// Env is blocked receiving
+	//当进程使用env_ipc_recv函数等待信息时，会将这个成员设置为1，然后堵塞等待；当一个进程向它发消息解除堵塞后，发送进程将此成员修改为0。
+	bool env_ipc_recving;		// Env is blocked receiving  
+	//如果进程要接受消息并且是传送页，保存页映射的地址，且该地址<=UTOP
 	void *env_ipc_dstva;		// VA at which to map received page
+	//若等待消息的进程接收到消息，发送方将接收方此成员设置为消息值。
 	uint32_t env_ipc_value;		// Data value sent to us
+	
 	envid_t env_ipc_from;		// envid of the sender
+	//如果进程要接收消息并且传送页，那么发送方发送页之后将传送的页权限赋给这个成员。
 	int env_ipc_perm;		// Perm of page mapping received
 };
 

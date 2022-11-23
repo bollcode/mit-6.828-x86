@@ -210,7 +210,7 @@ struct Segdesc {
  */
 
 #ifndef __ASSEMBLER__
-
+//其实就是TSS
 // Task state segment format (as described by the Pentium architecture book)
 struct Taskstate {
 	uint32_t ts_link;	// Old ts selector

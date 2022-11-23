@@ -15,7 +15,7 @@ struct CpuInfo *bootcpu;
 int ismp;
 int ncpu;
 
-// Per-CPU kernel stacks
+// Per-CPU kernel stacks 
 unsigned char percpu_kstacks[NCPU][KSTKSIZE]
 __attribute__ ((aligned(PGSIZE)));
 
@@ -162,6 +162,16 @@ mpconfig(struct mp **pmp)
 	return conf;
 }
 
+/*这个函数就是用来获取处理器信息的，有多少个cpu，每个cpu对应的LAPIC ID 和每个cpu对应的LAPIC的MMIO地址
+* 这些信息从bios中的mp configuration table 中读取的，
+* 然后将信息存在cpus数组中，每一个元素类型就是CpuInfo类型的结构
+* bootcpu 就是指向的保存BSP处理器信息的CpuInfo结构
+
+* 所以这个函数就是读取bios中的处理器信息，并初始化cpus信息。后面BSP根据这个cpus数组挨个启动每个APs(在boot_abs()函数启动)
+* 
+* 每个AP启动完成之后，就会执行kern/mpentry.S中的代码，然后再跳转到mp_main()函数，为当前处理器AP设置GDT,TSS等
+* 最后将cpus[]数组中对应CpuInfo结构类型元素的cpu_status属性设置为CPU_STARTED(代表已经启动了)
+*/
 void
 mp_init(void)
 {

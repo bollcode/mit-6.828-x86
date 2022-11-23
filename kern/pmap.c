@@ -111,7 +111,7 @@ boot_alloc(uint32_t n)
 	result = nextfree;
 	//now nextfree presents the next free memory address
 	//roundup是用来取整的,使得nextfree正好加4096个字节
-	nextfree = ROUNDUP(nextfree+n,PGSIZE);
+	nextfree = ROUNDUP((char *)result+n,PGSIZE);
 	return result;
 }
 
@@ -133,7 +133,7 @@ mem_init(void)
 	// Find out how much memory the machine has (npages & npages_basemem).
 	//npages 代表是整个内存的页数  npages_basemem表示的是basemem区域的页数
 	i386_detect_memory();
-	cprintf("napges === %u\n",npages);
+	// cprintf("napges === %u\n",npages);
 	// Remove this line when you're ready to test this function.
 	// panic("mem_init: This function is not finished\n")
 
@@ -143,7 +143,7 @@ mem_init(void)
 	kern_pgdir = (pde_t *) boot_alloc(PGSIZE);
 	//将从kern_pgdir开始的地址后的4096个字节都赋值为0
 	memset(kern_pgdir, 0, PGSIZE);
-	cprintf("kern_pgdir == %x",kern_pgdir);
+	// cprintf("kern_pgdir == %x\n",kern_pgdir);
 	//////////////////////////////////////////////////////////////////////
 	// Recursively insert PD in itself as a page table, to form
 	// a virtual page table at virtual address UVPT.
@@ -225,7 +225,7 @@ mem_init(void)
 	// we just set up the mapping anyway.
 	// Permissions: kernel RW, user NONE
 	// Your code goes here:
-
+	boot_map_region(kern_pgdir,KERNBASE,0xffffffff - KERNBASE,0,PTE_W);
 	// Initialize the SMP-related parts of the memory map
 	mem_init_mp();
 
@@ -281,6 +281,18 @@ mem_init_mp(void)
 	//     Permissions: kernel RW, user NONE
 	//
 	// LAB 4: Your code here:
+	//映射虚拟地址KSACKTOP之下的虚拟栈地址到percpu_kstacks数组空间去
+	//每个cpu都有自己的内核栈，这里将各个cpu的内核栈映射到指定的物理地址去
+	size_t i;
+    size_t kstacktop_i;
+	for( i=0;i<NCPU;i++){
+		kstacktop_i = KSTACKTOP - i * (KSTKSIZE + KSTKGAP);
+		boot_map_region(kern_pgdir,
+						kstacktop_i - KSTKSIZE,
+						KSTKSIZE,
+						PADDR(&percpu_kstacks[i]),
+						PTE_W);
+	}
 
 }
 
@@ -320,25 +332,50 @@ page_init(void)
 	// Change the code to reflect this.
 	// NB: DO NOT actually touch the physical memory corresponding to
 	// free pages!
+	// size_t i;
+	// page_free_list = NULL;
+	// //get the number of pages in extmem zone
+	// int num_extern_alloc = ((uint32_t)boot_alloc(0) - KERNBASE)/PGSIZE;
+	// // int num_iohole_alloc = 96;
+	// for (i = 0; i < npages; i++) {
+	// 	if(i == 0){
+	// 		pages[i].pp_ref = 1;
+	// 		pages[i].pp_link = NULL;
+	// 	}else if(i>=npages_basemem && i< num_extern_alloc){
+	// 		pages[i].pp_ref = 1;
+	// 		pages[i].pp_link = NULL;
+	// 	}else if (i == MPENTRY_PADDR / PGSIZE){
+	// 		//之所以在这判断一下，是因为后面多处理器的APs启动时的程序要放在这里，所以要把这里标志使用，防止后面被分配走
+	// 		pages[i].pp_ref = 1;
+	// 		pages[i].pp_link = NULL;
+	// 	}else{
+	// 		pages[i].pp_ref = 0;
+	// 		pages[i].pp_link = page_free_list;
+	// 		page_free_list = &pages[i];
+	// 	}
+		
+	// }
 	size_t i;
-	page_free_list = NULL;
-	//get the number of pages in extmem zone
-	int num_extern_alloc = ((uint32_t)boot_alloc(0) - KERNBASE)/PGSIZE;
-	// int num_iohole_alloc = 96;
+	size_t io_hole_start_page = (size_t)IOPHYSMEM / PGSIZE;
+	size_t kernel_end_page = PADDR(boot_alloc(0)) / PGSIZE;		//这里调了半天，boot_alloc返回的是虚拟地址，需要转为物理地址
 	for (i = 0; i < npages; i++) {
-		if(i == 0){
+		if (i == 0) {
 			pages[i].pp_ref = 1;
 			pages[i].pp_link = NULL;
-		}else if(i>=npages_basemem && i< num_extern_alloc){
+		} else if (i >= io_hole_start_page && i < kernel_end_page) {
 			pages[i].pp_ref = 1;
 			pages[i].pp_link = NULL;
-		}else{
+		} else if (i == MPENTRY_PADDR / PGSIZE) {
+			pages[i].pp_ref = 1;
+			pages[i].pp_link = NULL;
+		} else {
 			pages[i].pp_ref = 0;
 			pages[i].pp_link = page_free_list;
 			page_free_list = &pages[i];
 		}
 		
 	}
+	
 }
 
 //
@@ -621,7 +658,8 @@ tlb_invalidate(pde_t *pgdir, void *va)
 // Reserve size bytes in the MMIO region and map [pa,pa+size) at this
 // location.  Return the base of the reserved region.  size does *not*
 // have to be multiple of PGSIZE.
-//
+//LAPIC开始于物理地址的0xfe000000处，而我们现阶段内核映射到了物理地址0到256M处，需要将虚拟地址MMIOBASE映射到这里
+//参数pa代表的是LAPIC处的物理地址
 void *
 mmio_map_region(physaddr_t pa, size_t size)
 {
@@ -629,6 +667,7 @@ mmio_map_region(physaddr_t pa, size_t size)
 	// beginning of the MMIO region.  Because this is static, its
 	// value will be preserved between calls to mmio_map_region
 	// (just like nextfree in boot_alloc).
+	//设置成static，所以这个是变化的
 	static uintptr_t base = MMIOBASE;
 
 	// Reserve size bytes of virtual memory starting at base and
@@ -649,7 +688,15 @@ mmio_map_region(physaddr_t pa, size_t size)
 	// Hint: The staff solution uses boot_map_region.
 	//
 	// Your code here:
-	panic("mmio_map_region not implemented");
+	void *ret = (void *)base;
+	size = ROUNDUP(size,PGSIZE);
+	if(base + size > MMIOLIM || base + size < base){
+		panic("mmio_map_region: reservation overflow");
+	}
+	boot_map_region(kern_pgdir,base,size,pa,PTE_W|PTE_PCD|PTE_PWT);
+	base += size;
+	// panic("mmio_map_region not implemented");
+	return ret;
 }
 
 static uintptr_t user_mem_check_addr;
@@ -676,7 +723,7 @@ int
 user_mem_check(struct Env *env, const void *va, size_t len, int perm)
 {
 	// LAB 3: Your code here.
-	cprintf("user_mem_check va: %x,len: %x \n",va,len);
+	// cprintf("user_mem_check va: %x,len: %x \n",va,len);
 	uint32_t begin = (uint32_t)ROUNDDOWN(va,PGSIZE);
 	uint32_t end = (uint32_t)ROUNDUP(va+len,PGSIZE);
 	uint32_t i;
@@ -687,7 +734,7 @@ user_mem_check(struct Env *env, const void *va, size_t len, int perm)
 			return  -E_FAULT;
 		}
 	}
-	cprintf("user_mem_check success va: %x, len: %x\n", va, len);
+	// cprintf("user_mem_check success va: %x, len: %x\n", va, len);
 	return 0;
 }
 
