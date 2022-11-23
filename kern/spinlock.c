@@ -65,10 +65,11 @@ spin_lock(struct spinlock *lk)
 		panic("CPU %d cannot acquire %s: already holding", cpunum(), lk->name);
 #endif
 
-	// The xchg is atomic.
+	// The xchg is atomic.  这个xchg指令是个原子指令，用来交换两个数和mov差不多
 	// It also serializes, so that reads after acquire are not
 	// reordered before it. 
 	while (xchg(&lk->locked, 1) != 0)
+	//pause指令相当于noop指令，主要是节省功耗
 		asm volatile ("pause");
 
 	// Record info about lock acquisition for debugging.
