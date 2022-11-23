@@ -62,6 +62,7 @@ struct Trapframe {
 	uint16_t tf_ds;
 	uint16_t tf_padding2;
 	uint32_t tf_trapno;
+	//下面这些是由硬件cpu压入到栈中的，上面的那些我们需要自己去压入，也就是要保护的环境
 	/* below here defined by x86 hardware */
 	uint32_t tf_err;
 	uintptr_t tf_eip;

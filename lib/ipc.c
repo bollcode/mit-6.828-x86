@@ -23,8 +23,26 @@ int32_t
 ipc_recv(envid_t *from_env_store, void *pg, int *perm_store)
 {
 	// LAB 4: Your code here.
-	panic("ipc_recv not implemented");
-	return 0;
+	// panic("ipc_recv not implemented");
+	int r;
+	if(pg == NULL){
+		r = sys_ipc_recv((void *)UTOP); //说明不是页传送?
+	}else{
+		r = sys_ipc_recv(pg);          //说明是页传送
+	}
+	//上面设置好了接收状态，并阻塞住了，只有ipc完成之后才会到这里来
+	if(from_env_store !=NULL){
+		//下面设置哪个进程传送的消息
+		*from_env_store = r<0 ? 0:thisenv->env_ipc_from;
+	}
+	if(perm_store !=NULL){
+		*perm_store = r<0? 0:thisenv->env_ipc_perm;
+	}
+	if(r < 0){
+		return r;
+	}else{
+		return thisenv->env_ipc_value; //返回接收的数据
+	}
 }
 
 // Send 'val' (and 'pg' with 'perm', if 'pg' is nonnull) to 'toenv'.
@@ -39,7 +57,18 @@ void
 ipc_send(envid_t to_env, uint32_t val, void *pg, int perm)
 {
 	// LAB 4: Your code here.
-	panic("ipc_send not implemented");
+	int r;
+	void *dstpg;
+	dstpg =  pg !=NULL ? pg:(void *)UTOP;
+	while ((r = sys_ipc_try_send(to_env,val,dstpg,perm)) <0){
+		// cprintf("rrrrrrrrrrrrrrrrrrrrrrrrrrrr = %d \n",r);
+		if(r != -E_IPC_NOT_RECV){
+			panic("ipc_send: send message error %e", r);
+		}
+		sys_yield();
+	}
+	
+	// panic("ipc_send not implemented");
 }
 
 // Find the first environment of the given type.  We'll use this to

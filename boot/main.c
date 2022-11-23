@@ -35,13 +35,19 @@
 void readsect(void*, uint32_t);
 void readseg(uint32_t, uint32_t, uint32_t);
 
+
+//从boot.s跳转过来了，在那里我们完成了从实模式到保护模式的转换，并设置了代码段和数据段的起始地址和段界限都是从0x00000000到4G
 void
 bootmain(void)
 {
+
+	//Proghdr  程序头：描述这个程序段的信息，一个程序头一般32字节大小，这个尺寸在ELF header中也有指定
 	struct Proghdr *ph, *eph;
 	int i;
 
 	// read 1st page off disk
+	// 512b * 8 = 4kb = 1 page
+	//这个完成了将内核文件（ELF格式的文件）的前 4096（1 page）个字节读进到0x10000处
 	readseg((uint32_t) ELFHDR, SECTSIZE*8, 0);
 
 	// is this a valid ELF?
@@ -49,11 +55,17 @@ bootmain(void)
 		goto bad;
 
 	// load each program segment (ignores ph flags)
+	//ELFHDR->e_phoff这个代表的是第一个程序头在elf文件内的偏移量
+	//ph此时就代表指向了第一个程序头在内存中的位置
 	ph = (struct Proghdr *) ((uint8_t *) ELFHDR + ELFHDR->e_phoff);
+	//ELFHDR->e_phnum表示有几个程序头，eph指向最后一个程序头；
 	eph = ph + ELFHDR->e_phnum;
 	for (; ph < eph; ph++) {
+	//开始加载每个程序段
 		// p_pa is the load address of this segment (as well
 		// as the physical address)
+		//ph->p_offset表示在文件内的偏移字节数，ph->p_memsz表示在内存中的大小，ph->p_pa表示在内存中的地址
+		// 第一个段 p_pa == 0x100000      p_memsz = 0x7c96 p_offset = 0x1000 正好对应的4096开始，和刚才elf header读进来后面的保持一致 
 		readseg(ph->p_pa, ph->p_memsz, ph->p_offset);
 		for (i = 0; i < ph->p_memsz - ph->p_filesz; i++) {
 			*((char *) ph->p_pa + ph->p_filesz + i) = 0;
@@ -62,6 +74,9 @@ bootmain(void)
 
 	// call the entry point from the ELF header
 	// note: does not return!
+	//ELFHDR->e_entry表示程序（内核程序）的入口地址，段的加载地址是0x100000 ,程序的起始地址在0x10000c
+	//以上的都是bootloader程序，还没有开启虚拟地址，等下会进入内核程序，进入之后，指令的寻址方式都是采用的虚拟地址，
+	//内核程序在编址的时候设置的起始地址是0xf0100000  也就是4G内存下的256M空间
 	((void (*)(void)) (ELFHDR->e_entry))();
 
 bad:
@@ -73,6 +88,7 @@ bad:
 
 // Read 'count' bytes at 'offset' from kernel into physical address 'pa'.
 // Might copy more than asked
+//实现了将内核文件的elf header 读进到内存0x10000处
 void
 readseg(uint32_t pa, uint32_t count, uint32_t offset)
 {
@@ -83,7 +99,7 @@ readseg(uint32_t pa, uint32_t count, uint32_t offset)
 	// round down to sector boundary
 	pa &= ~(SECTSIZE - 1);
 
-	// translate from bytes to sectors, and kernel starts at sector 1
+	// translate from bytes to sectors, and kernel starts at sector 1  内核在扇区1
 	offset = (offset / SECTSIZE) + 1;
 
 	// If this is too slow, we could read lots of sectors at a time.
@@ -94,6 +110,7 @@ readseg(uint32_t pa, uint32_t count, uint32_t offset)
 		// an identity segment mapping (see boot.S), we can
 		// use physical addresses directly.  This won't be the
 		// case once JOS enables the MMU.
+		//将offset扇区的内核文件读到pa指向的地址
 		readsect((uint8_t*) pa, offset);
 		pa += SECTSIZE;
 		offset++;

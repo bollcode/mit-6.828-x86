@@ -210,7 +210,7 @@ struct Segdesc {
  */
 
 #ifndef __ASSEMBLER__
-
+//其实就是TSS
 // Task state segment format (as described by the Pentium architecture book)
 struct Taskstate {
 	uint32_t ts_link;	// Old ts selector
@@ -253,6 +253,7 @@ struct Taskstate {
 };
 
 // Gate descriptors for interrupts and traps
+//门描述符（中断门，调用门，任务门...） 8字节大小
 struct Gatedesc {
 	unsigned gd_off_15_0 : 16;   // low 16 bits of offset in segment
 	unsigned gd_sel : 16;        // segment selector

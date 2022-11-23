@@ -119,7 +119,12 @@ env_init(void)
 {
 	// Set up envs array
 	// LAB 3: Your code here.
-
+	env_free_list = NULL;
+	for (int i = NENV - 1; i >= 0; i--) {	//前插法构建链表
+		envs[i].env_id = 0;
+		envs[i].env_link = env_free_list;
+		env_free_list = &envs[i];
+	}
 	// Per-CPU part of the initialization
 	env_init_percpu();
 }
@@ -162,6 +167,7 @@ env_setup_vm(struct Env *e)
 	struct PageInfo *p = NULL;
 
 	// Allocate a page for the page directory
+	//申请一个页表当中用户进程的页目录表
 	if (!(p = page_alloc(ALLOC_ZERO)))
 		return -E_NO_MEM;
 
@@ -182,7 +188,22 @@ env_setup_vm(struct Env *e)
 	//    - The functions in kern/pmap.h are handy.
 
 	// LAB 3: Your code here.
+	//确定用户页目录表的虚拟地址
+	e->env_pgdir = (pde_t *)page2kva(p);
 
+
+	//将UTOP以下的虚拟地址对应的页目录项都赋值0
+	// for(int i=0;i<PDX(UTOP);i++){
+	// 	e->env_pgdir[i] = 0;
+	// }
+
+	//所有进程的内核虚拟空间，都会被映射到之前操作系统程序的内核虚拟空间映射到的地方，
+	//其实就是将内核的页目录表的UTOP对应的页目录项复制到各个用户进程的页目录表的相同的位置，这样，当用户进程访问自己的内核虚拟地址的时候
+	//就会被映射到实际的内核程序的存储的物理地址
+
+	//将UTOP之上的虚拟地址的页目录项设置为内核页目录表相同的页目录项的值
+	memcpy(e->env_pgdir, kern_pgdir, PGSIZE);
+	p->pp_ref++;
 	// UVPT maps the env's own page table read-only.
 	// Permissions: kernel R, user R
 	e->env_pgdir[PDX(UVPT)] = PADDR(e->env_pgdir) | PTE_P | PTE_U;
@@ -209,6 +230,7 @@ env_alloc(struct Env **newenv_store, envid_t parent_id)
 		return -E_NO_FREE_ENV;
 
 	// Allocate and set up the page directory for this environment.
+	//给env申请一个页表，并初始化页表（包括将UTOP上的页目录项放到自己的页目录表内）
 	if ((r = env_setup_vm(e)) < 0)
 		return r;
 
@@ -247,18 +269,19 @@ env_alloc(struct Env **newenv_store, envid_t parent_id)
 
 	// Enable interrupts while in user mode.
 	// LAB 4: Your code here.
-
+	//在用户模式下开启中断
+	e->env_tf.tf_eflags |= FL_IF;
 	// Clear the page fault handler until user installs one.
 	e->env_pgfault_upcall = 0;
 
 	// Also clear the IPC receiving flag.
 	e->env_ipc_recving = 0;
-
+	// sched_halt()
 	// commit the allocation
 	env_free_list = e->env_link;
 	*newenv_store = e;
-
 	// cprintf("[%08x] new env %08x\n", curenv ? curenv->env_id : 0, e->env_id);
+
 	return 0;
 }
 
@@ -268,7 +291,7 @@ env_alloc(struct Env **newenv_store, envid_t parent_id)
 // Does not zero or otherwise initialize the mapped pages in any way.
 // Pages should be writable by user and kernel.
 // Panic if any allocation attempt fails.
-//
+// 完成用户程序的虚拟地址和物理地址的映射，也就是设置好了env_pgdir
 static void
 region_alloc(struct Env *e, void *va, size_t len)
 {
@@ -279,6 +302,27 @@ region_alloc(struct Env *e, void *va, size_t len)
 	//   'va' and 'len' values that are not page-aligned.
 	//   You should round va down, and round (va + len) up.
 	//   (Watch out for corner-cases!)
+	//向下取整，找到va所在的页的起始虚拟地址
+	void *start = (void *)ROUNDDOWN((uint32_t)va,PGSIZE);
+	void *end = (void *)ROUNDUP((uint32_t)(va) + len,PGSIZE);
+
+	//开始找空闲页进行映射
+	struct PageInfo *pp;
+	void *i;
+	int r = 1;
+	for(i = start;i<end;i += PGSIZE){
+		//从空闲链表中拿出一个页出来
+		pp = page_alloc(0);
+		if(pp ==NULL){
+			panic("PageInfo allocation is failed");
+		}
+		//将指定的虚拟地址 i 和指定的物理地址进行映射
+		r = page_insert(e->env_pgdir,pp,i,PTE_W | PTE_U);
+		if(r!=0){
+			panic("region alloc failed");
+		}
+	}
+	
 }
 
 //
@@ -335,11 +379,48 @@ load_icode(struct Env *e, uint8_t *binary)
 	//  What?  (See env_run() and env_pop_tf() below.)
 
 	// LAB 3: Your code here.
+	struct Proghdr *ph,*eph;
+	struct Elf *header = (struct Elf *)binary; 
 
+
+	if(header->e_magic !=ELF_MAGIC){
+		panic("load_icode faild: the binary is not elf");
+	}
+	if(header->e_entry == 0){
+		panic("load_icode failed : the elf can");
+	}
+
+	//第一个程序头的地址
+	ph = (struct Proghdr *) ((uint8_t *) (header) + header->e_phoff); 
+	//最后一个程序头的截至地址
+	eph = ph + header->e_phnum;
+	lcr3(PADDR(e->env_pgdir));   //load user pgdir
+	//完成代码段虚拟地址和物理地址的分配映射，以及将代码加载到指定的物理地址去
+	for(; ph < eph; ph++){
+		if(ph->p_type == ELF_PROG_LOAD){
+			
+			if(ph->p_filesz > ph->p_memsz){
+				panic("load_icode failed : p_memsz < p_filesz");
+			}
+			//ph->p_va表示本段在内存中的起始虚拟地址地址
+			//将这个代码段给映射到指定的物理地址空间，并填充对应的页表
+			region_alloc(e,(void *)ph->p_va,ph->p_memsz);
+			//将binary内存中的代码段加载到空闲页面的物理地址中
+			//因为上面将代码段的起始虚拟地址映射到了指定的物理地址，所以要将代码段复制到指定的物理地址去，这样在后面运行代码的时候，才能保证一致
+			memmove((void *)ph->p_va,binary + ph->p_offset,ph->p_filesz);
+			//因为一般内存中的代码段大小大于在文件中的大小，所以多余的地方补0
+			memset((void *)(ph->p_va + ph->p_filesz), 0, ph->p_memsz - ph->p_filesz);
+		}
+	}
+	lcr3(PADDR(kern_pgdir));
+	//设置这个程序入口地址
+	e->env_tf.tf_eip = header->e_entry;
 	// Now map one page for the program's initial stack
 	// at virtual address USTACKTOP - PGSIZE.
 
 	// LAB 3: Your code here.
+	//为用户进程分配栈空间（也就是完成用户栈虚拟地址到物理地址的分配和映射）
+	region_alloc(e,(void *)(USTACKTOP -PGSIZE),PGSIZE);
 }
 
 //
@@ -354,8 +435,22 @@ env_create(uint8_t *binary, enum EnvType type)
 {
 	// LAB 3: Your code here.
 
+
 	// If this is the file server (type == ENV_TYPE_FS) give it I/O privileges.
 	// LAB 5: Your code here.
+
+	struct Env *env;
+	int rc;
+	//申请一个env,并将这个env结构初始化，比如他的页目录表地址，他的Trapframe属性（这个比较关键，后面中断恢复也是用它）
+	rc = env_alloc(&env,0);
+	if(rc !=0){
+		panic("env_create failed: env_alloc failed");
+	}
+	env->env_type = type;
+	//解析elf文件，分配物理地址空间，完善代码段虚拟地址和物理地址映射关系，和并将代码段复制到对应物理空间
+	load_icode(env,binary);
+	// cprintf("env->env_status == %d \n",env->env_status);
+	// cprintf("env create successfully\n");
 }
 
 //
@@ -441,7 +536,7 @@ env_destroy(struct Env *e)
 // This exits the kernel and starts executing some environment's code.
 //
 // This function does not return.
-//
+//这个是退出内核状态，恢复在Trapframe中存储的值到各个寄存器中
 void
 env_pop_tf(struct Trapframe *tf)
 {
@@ -449,13 +544,14 @@ env_pop_tf(struct Trapframe *tf)
 	curenv->env_cpunum = cpunum();
 
 	asm volatile(
-		"\tmovl %0,%%esp\n"
-		"\tpopal\n"
-		"\tpopl %%es\n"
-		"\tpopl %%ds\n"
-		"\taddl $0x8,%%esp\n" /* skip tf_trapno and tf_errcode */
-		"\tiret\n"
-		: : "g" (tf) : "memory");
+		 "\t movl %0, %%esp\n"       /* %0对应后面的tf，这里是将tf这个地址值赋给%esp */
+        "\t popal\n"                /* 按*/
+        "\t popl %%es\n"            /* 弹出值到%es */
+        "\t popl %%ds\n"            /* 弹出值到%ds */
+        "\t addl $0x8, %%esp\n"     /* 跳过tf_trapno 和 tf_errcode */
+        "\t iret\n"                 /* 从中断返回，将栈中存储数据弹出到eip, cs, eflags寄存器中 */
+        : : "g"(tf) : "memory");    /* “g”表示将输入变量tf放入eax，ebx，ecx，edx之一,或作为内存变量 */
+                                    /* 告诉编译器在执行期间会发生内存变动，以防止错误的代码优化 */
 	panic("iret failed");  /* mostly to placate the compiler */
 }
 
@@ -486,7 +582,19 @@ env_run(struct Env *e)
 	//	e->env_tf to sensible values.
 
 	// LAB 3: Your code here.
-
-	panic("env_run not yet implemented");
+	if(curenv !=NULL && curenv->env_status == ENV_RUNNING){
+		curenv->env_status = ENV_RUNNABLE;
+	}
+	curenv = e;
+	curenv->env_status = ENV_RUNNING;
+	curenv->env_runs++;
+	//将这进程的页目录表加载到cr3寄存器中
+	lcr3(PADDR(curenv->env_pgdir));
+	//进入用户环境后，将内核锁释放掉
+	unlock_kernel();
+	//进入用户环境
+	//这个函数将之前设置的e->env_tf->tf_eip弹出到eip寄存器中，这样就完成了程序的转换了。
+	env_pop_tf(&(e->env_tf));
+	// panic("env_run not yet implemented");
 }
 

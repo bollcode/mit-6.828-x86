@@ -6,9 +6,11 @@
 #include <inc/stdarg.h>
 
 
+//输出一个字符
 static void
 putch(int ch, int *cnt)
 {
+	//主要是这个程序用来输出一个字符给显示器
 	cputchar(ch);
 	*cnt++;
 }

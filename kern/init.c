@@ -18,6 +18,9 @@
 static void boot_aps(void);
 
 
+//从entry.s 文件跳转过来，在那里我们完成了开启分页模式，设置好了页表，并把页目录表地址给了cr3寄存器，后面地址的映射交给MMU
+//现在就开始初始化一些东西
+
 void
 i386_init(void)
 {
@@ -28,13 +31,16 @@ i386_init(void)
 	cprintf("6828 decimal is %o octal!\n", 6828);
 
 	// Lab 2 memory management initialization functions
+	//这个函数构建了一个页表，并将新的页目录表的物理地址赋给cr3
 	mem_init();
-
+	
 	// Lab 3 user environment initialization functions
 	env_init();
 	trap_init();
 
+
 	// Lab 4 multiprocessor initialization functions
+	//这函数完成读取bios中的mp configuration table信息，初始化cpus[]数组，记录每个cpu的信息
 	mp_init();
 	lapic_init();
 
@@ -43,7 +49,9 @@ i386_init(void)
 
 	// Acquire the big kernel lock before waking up APs
 	// Your code here:
-
+	//获取锁
+	lock_kernel();
+	// env_run;
 	// Starting non-boot CPUs
 	boot_aps();
 
@@ -55,13 +63,13 @@ i386_init(void)
 	ENV_CREATE(TEST, ENV_TYPE_USER);
 #else
 	// Touch all you want.
-	ENV_CREATE(user_icode, ENV_TYPE_USER);
+	 ENV_CREATE(user_icode, ENV_TYPE_USER);
 #endif // TEST*
 
 	// Should not be necessary - drains keyboard because interrupt has given up.
 	kbd_intr();
-
 	// Schedule and run the first user environment!
+	//唤醒一个进程
 	sched_yield();
 }
 
@@ -80,6 +88,8 @@ boot_aps(void)
 
 	// Write entry code to unused memory at MPENTRY_PADDR
 	code = KADDR(MPENTRY_PADDR);
+	//mpentry_start和mpentry_end是编译器导出符号，代表这段代码在内存（虚拟地址）中的起止位置
+	//接着把代码复制到MPENTRY_PADDR处
 	memmove(code, mpentry_start, mpentry_end - mpentry_start);
 
 	// Boot each AP one at a time
@@ -115,9 +125,10 @@ mp_main(void)
 	// only one CPU can enter the scheduler at a time!
 	//
 	// Your code here:
-
-	// Remove this after you finish Exercise 6
-	for (;;);
+	lock_kernel();
+	sched_yield();
+	// // Remove this after you finish Exercise 6
+	// for (;;);
 }
 
 /*

@@ -199,8 +199,9 @@ cga_putc(int c)
 	// What is the purpose of this?
 	if (crt_pos >= CRT_SIZE) {
 		int i;
-
+		//将1-79行的字符复制到0-78行处
 		memmove(crt_buf, crt_buf + CRT_COLS, (CRT_SIZE - CRT_COLS) * sizeof(uint16_t));
+		//给79行全部置为' '
 		for (i = CRT_SIZE - CRT_COLS; i < CRT_SIZE; i++)
 			crt_buf[i] = 0x0700 | ' ';
 		crt_pos -= CRT_COLS;

@@ -3,6 +3,10 @@
 #include <inc/syscall.h>
 #include <inc/lib.h>
 
+/*
+	注意这个syscall是lib目录下的，是属于一个库函数
+	用户程序通过这里出发int 0x30 中断，然后内核会根据这个系统调用号来决定调用什么函数
+*/
 static inline int32_t
 syscall(int num, int check, uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4, uint32_t a5)
 {

@@ -43,8 +43,8 @@
 #define TDCR    (0x03E0/4)   // Timer Divide Configuration
 
 physaddr_t lapicaddr;        // Initialized in mpconfig.c
-volatile uint32_t *lapic;
 
+volatile uint32_t *lapic;
 static void
 lapicw(int index, int value)
 {
@@ -60,6 +60,7 @@ lapic_init(void)
 
 	// lapicaddr is the physical address of the LAPIC's 4K MMIO
 	// region.  Map it in to virtual memory so we can access it.
+	//这个函数返回了lapic数组中的每一个元素的地址，（就是每个cpu对应的lapic地址）
 	lapic = mmio_map_region(lapicaddr, 4096);
 
 	// Enable local APIC; set spurious interrupt vector.
