@@ -207,6 +207,7 @@ serve_set_size(envid_t envid, struct Fsreq_set_size *req)
 int
 serve_read(envid_t envid, union Fsipc *ipc)
 {
+	//在Fsipc页中保存的参数
 	struct Fsreq_read *req = &ipc->read;
 	struct Fsret_read *ret = &ipc->readRet;
 
@@ -214,7 +215,19 @@ serve_read(envid_t envid, union Fsipc *ipc)
 		cprintf("serve_read %08x %08x %08x\n", envid, req->req_fileid, req->req_n);
 
 	// Lab 5: Your code here:
-	return 0;
+	struct OpenFile *po = NULL;
+	int  r, req_n;
+	//查找这个fileid对应的文件是否打开了，打开了就拿到这个openfile结构
+	if((r = openfile_lookup(envid,req->req_fileid,&po)) < 0){
+		return r;
+	}
+	// req_n = req->req_n > PGSIZE ? PGSIZE : req->req_n;
+	//从文件的指定位置读取文件
+	if(( r = file_read(po->o_file,ret->ret_buf,req->req_n,po->o_fd->fd_offset)) < 0){
+		return r;
+	}
+	po->o_fd->fd_offset +=r;
+	return r;
 }
 
 
@@ -229,7 +242,18 @@ serve_write(envid_t envid, struct Fsreq_write *req)
 		cprintf("serve_write %08x %08x %08x\n", envid, req->req_fileid, req->req_n);
 
 	// LAB 5: Your code here.
-	panic("serve_write not implemented");
+	struct OpenFile *o;
+	int r, req_n;
+
+	if ((r = openfile_lookup(envid, req->req_fileid, &o)) < 0)
+			return r;
+	req_n = req->req_n > PGSIZE ? PGSIZE : req->req_n;
+	if ((r = file_write(o->o_file, req->req_buf, req_n, o->o_fd->fd_offset)) < 0)
+			return r;
+	o->o_fd->fd_offset += r;
+
+	return r;
+	// panic("serve_write not implemented");
 }
 
 // Stat ipc->stat.req_fileid.  Return the file's struct Stat to the
@@ -291,6 +315,12 @@ fshandler handlers[] = {
 	[FSREQ_SYNC] =		serve_sync
 };
 
+/**
+ * 1、从IPC接受1个请求类型req以及数据页fsreq
+　　2、然后根据req来执行相应的服务端处理函数
+　　3、将相应服务端函数的执行结果(如果产生了数据也则有pg)通过IPC发送回调用进程
+　　4、将映射好的物理页fsreq取消映射
+ */
 void
 serve(void)
 {
@@ -300,6 +330,12 @@ serve(void)
 
 	while (1) {
 		perm = 0;
+		/**
+		 * //文件系统进程将阻塞在这里，等待别的进程发送请求过来，在文件进程中，将0x0ffff000虚拟地址映射到发送进程的物理页共享地址，用于参数传递
+		//这个fsreq虚拟地址的映射是在发送进程中完成的。
+		//接收完成数据后，返回其他进程的请求类型
+		//这个请求类型，就是决定了我们在这个共享页(unio Fsipc -- 这个里面有很多结构)中所要定位的位置，然后获取到这个参数
+		 */
 		req = ipc_recv((int32_t *) &whom, fsreq, &perm);
 		if (debug)
 			cprintf("fs req %d from %08x [page %08x: %s]\n",

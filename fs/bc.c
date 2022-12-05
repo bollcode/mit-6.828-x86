@@ -29,9 +29,9 @@ va_is_dirty(void *va)
 static void
 bc_pgfault(struct UTrapframe *utf)
 {
-	void *addr = (void *) utf->utf_fault_va;
-	uint32_t blockno = ((uint32_t)addr - DISKMAP) / BLKSIZE;
-	int r;
+	void *addr = (void *) utf->utf_fault_va;//发生缺页中断的地方
+	uint32_t blockno = ((uint32_t)addr - DISKMAP) / BLKSIZE;  //获取磁盘块编号
+	int r =0;
 
 	// Check that the fault was within the block cache region
 	if (addr < (void*)DISKMAP || addr >= (void*)(DISKMAP + DISKSIZE))
@@ -48,7 +48,11 @@ bc_pgfault(struct UTrapframe *utf)
 	// the disk.
 	//
 	// LAB 5: you code here:
-
+	addr = ROUNDDOWN(addr,PGSIZE);  //获取发生缺页中断的页
+	if((sys_page_alloc(0,addr,PTE_W|PTE_U|PTE_P) < 0))//为文件系统进程申请一个页，并完成映射
+		 panic("in bc_pgfault, sys_page_alloc: %e", r);
+	if((r = ide_read(blockno * BLKSECTS,addr,BLKSECTS))< 0) //blockno * BLKSECTS表示扇区号（一个块包含BLKSECTS个扇区）。功能是将某个扇区号开始的扇区读进来BLKSECTS个扇区到addr处
+		panic("in bc_pgfault, ide_read: %e", r);
 	// Clear the dirty bit for the disk block page since we just read the
 	// block from disk
 	if ((r = sys_page_map(0, addr, 0, addr, uvpt[PGNUM(addr)] & PTE_SYSCALL)) < 0)
@@ -77,7 +81,18 @@ flush_block(void *addr)
 		panic("flush_block of bad va %08x", addr);
 
 	// LAB 5: Your code here.
-	panic("flush_block not implemented");
+	int r =0;
+	addr = ROUNDDOWN(addr,PGSIZE);
+	//脏块的判断是通过PTE_D来判断的
+	if(va_is_mapped(addr) && va_is_dirty(addr)){  //先看这个addr有没有读进来的扇区，并且有没有被修改,如果有，那么就将这个addr对应的块同步到磁盘
+		if((r = ide_write(blockno * BLKSECTS,addr,BLKSECTS)) < 0){ //将addr地址开始的块内存写入到磁盘扇区编号为blockno * BLKSECTS地方
+			panic("in flush_block, ide_write: %e", r);
+		}
+		if((r = sys_page_map(0,addr,0,addr,uvpt[PGNUM(addr)] & PTE_SYSCALL)) < 0){ //清空PTE_D位，也就是dirty，这个就是重新自映射一下，只是把perm改了一下
+			panic("in bc_pgfault, sys_page_map: %e", r);
+		}
+	}
+	// panic("flush_block not implemented");
 }
 
 // Test that the block cache works, by smashing the superblock and

@@ -42,6 +42,7 @@ i386_init(void)
 	// Lab 4 multiprocessor initialization functions
 	//这函数完成读取bios中的mp configuration table信息，初始化cpus[]数组，记录每个cpu的信息
 	mp_init();
+	//每一个cpu都有一个lapic
 	lapic_init();
 
 	// Lab 4 multitasking initialization functions
@@ -49,7 +50,7 @@ i386_init(void)
 
 	// Acquire the big kernel lock before waking up APs
 	// Your code here:
-	//获取锁
+	//获取锁--
 	lock_kernel();
 	// env_run;
 	// Starting non-boot CPUs
@@ -63,7 +64,7 @@ i386_init(void)
 	ENV_CREATE(TEST, ENV_TYPE_USER);
 #else
 	// Touch all you want.
-	 ENV_CREATE(user_icode, ENV_TYPE_USER);
+	 ENV_CREATE(user_spawnhello, ENV_TYPE_USER);
 #endif // TEST*
 
 	// Should not be necessary - drains keyboard because interrupt has given up.
@@ -89,7 +90,7 @@ boot_aps(void)
 	// Write entry code to unused memory at MPENTRY_PADDR
 	code = KADDR(MPENTRY_PADDR);
 	//mpentry_start和mpentry_end是编译器导出符号，代表这段代码在内存（虚拟地址）中的起止位置
-	//接着把代码复制到MPENTRY_PADDR处
+	//接着把代码复制到MPENTRY_PADDR处,这个代码就是mpentry.S文件
 	memmove(code, mpentry_start, mpentry_end - mpentry_start);
 
 	// Boot each AP one at a time
@@ -107,7 +108,7 @@ boot_aps(void)
 	}
 }
 
-// Setup code for APs
+// Setup code for APs  //这个函数调用在mpentry.S中
 void
 mp_main(void)
 {
@@ -126,6 +127,9 @@ mp_main(void)
 	//
 	// Your code here:
 	lock_kernel();
+
+	//这里每个cpu最开始的时候会运行这个函数，以获取一个env进行运行，所以必须要获取锁，envs属于各个cpu的公共资源，所以需要加锁
+	//并不是所有cpu陷入内核都需要锁？因为每个cpu都有自己的栈空间，所以不是可以同时两个cpu陷入内核态
 	sched_yield();
 	// // Remove this after you finish Exercise 6
 	// for (;;);

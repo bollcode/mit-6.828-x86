@@ -16,6 +16,7 @@ static int copy_shared_pages(envid_t child);
 // argv: pointer to null-terminated array of pointers to strings,
 // 	 which will be passed to the child as its command-line arguments.
 // Returns child envid on success, < 0 on failure.
+//这个函数用来从文件系统中加载程序并运行这个进程
 int
 spawn(const char *prog, const char **argv)
 {
@@ -302,6 +303,21 @@ static int
 copy_shared_pages(envid_t child)
 {
 	// LAB 5: Your code here.
+	int i,j ,pn,r;
+	for(i = PDX(UTEXT);i<PDX(UXSTACKTOP);i++){
+		if(uvpd[i] & PTE_P){
+			for(j = 0; j<NPTENTRIES;j++){
+				pn = PGNUM(PGADDR(i,j,0));
+				if(pn == PGNUM(UXSTACKTOP - PGSIZE)){
+					break;
+				}
+				if((uvpt[pn] &PTE_P) && (uvpt[pn] & PTE_SHARE)){
+					if((r = sys_page_map(0,(void *)PGADDR(i,j,0),child,(void *)PGADDR(i, j, 0), uvpt[pn] & PTE_SYSCALL)) < 0)
+						return r;
+				}
+			}
+		}
+	}
 	return 0;
 }
 

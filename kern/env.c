@@ -446,7 +446,11 @@ env_create(uint8_t *binary, enum EnvType type)
 	if(rc !=0){
 		panic("env_create failed: env_alloc failed");
 	}
+	cprintf("hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh");
 	env->env_type = type;
+	if(type == ENV_TYPE_FS){
+		env->env_tf.tf_eflags |= FL_IOPL_MASK;   //0x00003000	// I/O Privilege Level bitmask
+	}
 	//解析elf文件，分配物理地址空间，完善代码段虚拟地址和物理地址映射关系，和并将代码段复制到对应物理空间
 	load_icode(env,binary);
 	// cprintf("env->env_status == %d \n",env->env_status);

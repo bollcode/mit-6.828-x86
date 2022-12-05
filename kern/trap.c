@@ -159,20 +159,19 @@ trap_init_percpu(void)
 	//
 	// LAB 4: Your code here:
 	thiscpu->cpu_ts.ts_esp0 = KSTACKTOP - cpunum() * (KSTKGAP + KSTKSIZE);
-	thiscpu->cpu_ts.ts_ss0 = GD_KD;
-	// Setup a TSS so that we get the right stack
-	// when we trap to the kernel.
-	
-	// Initialize the TSS slot of the gdt.
-	gdt[(GD_TSS0 >> 3)+cpunum()] = SEG16(STS_T32A, (uint32_t) (&thiscpu->cpu_ts),sizeof(struct Taskstate) - 1, 0);
-	gdt[(GD_TSS0 >> 3)+cpunum()].sd_s = 0;
+    thiscpu->cpu_ts.ts_ss0 = GD_KD;
+	thiscpu->cpu_ts.ts_iomb = sizeof(struct Taskstate);
+    // Initialize the TSS slot of the gdt.
+    // TSS Task State Segment
+    gdt[(GD_TSS0 >> 3) + cpunum()] = SEG16(STS_T32A, (uint32_t) (&thiscpu->cpu_ts), sizeof(struct Taskstate) - 1, 0);
+    gdt[(GD_TSS0 >> 3) + cpunum()].sd_s = 0;
 
-	// Load the TSS selector (like other segment selectors, the
-	// bottom three bits are special; we leave them 0)
-	ltr(GD_TSS0 + sizeof(struct Segdesc) * cpunum());
+    // Load the TSS selector (like other segment selectors, the
+    // bottom three bits are special; we leave them 0)
+    ltr(GD_TSS0 + sizeof(struct Segdesc) * cpunum());
 
-	// Load the IDT
-	lidt(&idt_pd);
+    // Load the IDT
+    lidt(&idt_pd);
 }
 
 void
@@ -247,14 +246,18 @@ trap_dispatch(struct Trapframe *tf)
 	// LAB 5: Your code here.
 
 	// Unexpected trap: The user process or the kernel has a bug.
-	print_trapframe(tf);
-	if (tf->tf_cs == GD_KT)
-		panic("unhandled trap in kernel");
-	else {
-		env_destroy(curenv);
-		return;
 
-	
+
+	if (tf->tf_trapno == IRQ_OFFSET + IRQ_KBD) {
+                lapic_eoi();
+    			kbd_intr();
+                return;
+        }
+	if (tf->tf_trapno == IRQ_OFFSET + IRQ_SERIAL) {
+			lapic_eoi();
+    		serial_intr();
+			return;
+	}
 
 	switch(tf->tf_trapno){
 		case T_PGFLT:
@@ -284,9 +287,7 @@ trap_dispatch(struct Trapframe *tf)
 				env_destroy(curenv);
 				return;
 			}
-		}
 	}
-	
 }
 
 //在_alltraps中我们调用了这个trap函数，处理异常或中断事件

@@ -10,6 +10,7 @@
         "sched.h": "c",
         "lib.h": "c",
         "mmu.h": "c",
-        "stdio.h": "c"
+        "stdio.h": "c",
+        "fs.h": "c"
     }
 }

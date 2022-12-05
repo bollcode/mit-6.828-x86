@@ -90,26 +90,34 @@ duppage(envid_t envid, unsigned pn)
 	int perm;
 	addr = (void *)((uint32_t)pn * PGSIZE);
 	pte = uvpt[pn];
-	perm = PTE_P | PTE_U;
-	//把可写或者写时复制页面标记为COW和不可写
-	if((pte & PTE_W) || (pte & PTE_COW)){
-		perm |= PTE_COW;
-		// perm &= ~PTE_W;
-	}
-	//将父进程的页面映射复制到子进程地址空间，实际上就是父进程和子进程共享一个物理页面，所以虚
-    //拟地址同一个。
-	if((r = sys_page_map(thisenv->env_id,addr,envid,addr,perm))<0){
-		panic("duppage: page remapping failed %e", r);
-        return r;
-	}
-	//更新一下父进程页面映射的权限。
-	if (perm & PTE_COW) {
-		if ((r = sys_page_map(thisenv->env_id, addr, thisenv->env_id, addr, perm)) < 0) {
-				panic("duppage: page remapping failed %e", r);
-				return r;
+	if(pte & PTE_SHARE){
+		////对于标识为PTE_SHARE的页，拷贝映射关系，并且两个进程都有读写权限  这里不是复制了，是文件进程和对应进程共享这个区域
+		if((r = sys_page_map(sys_getenvid(),addr,envid,addr,pte&PTE_SYSCALL)) < 0){
+			panic("duppage: page mapping failed %e", r);
+			return r;
 		}
-    }
-	// panic("duppage not implemented");
+	}else{
+		perm = PTE_P | PTE_U;
+		//把可写或者写时复制页面标记为COW和不可写
+		if((pte & PTE_W) || (pte & PTE_COW)){
+			perm |= PTE_COW;
+			// perm &= ~PTE_W;
+		}
+		//将父进程的页面映射复制到子进程地址空间，实际上就是父进程和子进程共享一个物理页面，所以虚
+		//拟地址同一个。
+		if((r = sys_page_map(thisenv->env_id,addr,envid,addr,perm))<0){
+			panic("duppage: page remapping failed %e", r);
+			return r;
+		}
+		//更新一下父进程页面映射的权限。
+		if (perm & PTE_COW) {
+			if ((r = sys_page_map(thisenv->env_id, addr, thisenv->env_id, addr, perm)) < 0) {
+					panic("duppage: page remapping failed %e", r);
+					return r;
+			}
+		}
+		// panic("duppage not implemented");
+	}
 	return 0;
 }
 

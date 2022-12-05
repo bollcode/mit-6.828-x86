@@ -3,6 +3,8 @@
 
 #include "fs.h"
 
+struct Super *super;
+uint32_t *bitmap;
 // --------------------------------------------------------------
 // Super block
 // --------------------------------------------------------------
@@ -43,7 +45,7 @@ free_block(uint32_t blockno)
 	// Blockno zero is the null pointer of block numbers.
 	if (blockno == 0)
 		panic("attempt to free zero block");
-	bitmap[blockno/32] |= 1<<(blockno%32);
+	bitmap[blockno/32] |= 1<<(blockno%32); //1表示空的，0表示已使用
 }
 
 // Search the bitmap for a free block and allocate it.  When you
@@ -54,6 +56,7 @@ free_block(uint32_t blockno)
 // -E_NO_DISK if we are out of blocks.
 //
 // Hint: use free_block as an example for manipulating the bitmap.
+//给bitmap的对用的块编号置0（已使用）
 int
 alloc_block(void)
 {
@@ -62,7 +65,16 @@ alloc_block(void)
 	// super->s_nblocks blocks in the disk altogether.
 
 	// LAB 5: Your code here.
-	panic("alloc_block not implemented");
+	uint32_t blockno;
+	for(blockno = 0; blockno < super->s_nblocks ; blockno++){
+		if(block_is_free(blockno)){
+			bitmap[blockno/32] ^= 1<<(blockno%32);  //给这个空闲的位置0；表示已使用
+			//紧接着将bitmap同步到磁盘
+			flush_block(bitmap); //虚拟地址和磁盘块地址都是对应好的了
+			return blockno;
+ 		}
+	}
+	// panic("alloc_block not implemented");
 	return -E_NO_DISK;
 }
 
@@ -131,11 +143,41 @@ fs_init(void)
 //
 // Analogy: This is like pgdir_walk for files.
 // Hint: Don't forget to clear any block you allocate.
+//这个函数找到文件f的第filebno块的block，*ppdiskbno 中装的就是f文件中的filebno对应的地址，**ppdiskbno就是blockno，不是地址
 static int
 file_block_walk(struct File *f, uint32_t filebno, uint32_t **ppdiskbno, bool alloc)
 {
        // LAB 5: Your code here.
-       panic("file_block_walk not implemented");
+	   int r =0;
+	   //判断是否超过 1024 + 10 个block范围
+	   if(filebno >= NDIRECT + NINDIRECT){
+		   return -E_INVAL;
+	   }
+	   //判断是否是直接块
+	   if(filebno < NDIRECT){
+		   if(ppdiskbno !=NULL){
+			   *ppdiskbno = f->f_direct + filebno;
+		   }
+		   return 0;
+	   }
+	   //判断是否是间接块，如果是，那么判断是否申请
+	   if(!alloc && !f->f_indirect)
+	   		return -E_NOT_FOUND;
+		//如果没有间接块，并且允许申请
+		if(!f->f_indirect){
+			if((r = alloc_block()) < 0){
+				return -E_NO_DISK;
+			}
+			f->f_indirect = r;
+			memset(diskaddr(r),0,BLKSIZE);
+			//同步磁盘--间接块
+			flush_block(diskaddr(r));
+		}
+		if(ppdiskbno){
+			*ppdiskbno = (uint32_t*)diskaddr(f->f_indirect) + filebno - NDIRECT; 
+		}
+		return 0;
+    //    panic("file_block_walk not implemented");
 }
 
 // Set *blk to the address in memory where the filebno'th
@@ -150,13 +192,30 @@ int
 file_get_block(struct File *f, uint32_t filebno, char **blk)
 {
        // LAB 5: Your code here.
-       panic("file_get_block not implemented");
+	   int r =0;
+	   uint32_t *ppdiskbno;
+	   if((r = file_block_walk(f,filebno,&ppdiskbno,1)) < 0){
+		   return r;
+	   }
+	   //这个ppdiskbno装的就是文件f中指向block 的filebno的地址，
+	   if( *ppdiskbno == 0){ //说明还没有给filebno对应的块索引分配块
+			if(( r = alloc_block()) < 0){ //给filebno对应的数组内容分配一个block（就是把申请一个block并把这个blockno放到f的filebno中）
+				return -E_NO_DISK;
+			}
+			*ppdiskbno = r; //给f中的filebno赋值，blockno
+			memset(diskaddr(r),0,BLKSIZE);
+			flush_block(diskaddr(r));
+	   }
+	   *blk = diskaddr(*ppdiskbno);//给这个blockno对应的虚拟地址返回
+	   return 0;
+    //    panic("file_get_block not implemented");
 }
 
 // Try to find a file named "name" in dir.  If so, set *file to it.
 //
 // Returns 0 and sets *file on success, < 0 on error.  Errors are:
 //	-E_NOT_FOUND if the file is not found
+//该函数查找dir指向的文件内容，寻找File.name为name的File结构，并保存到file地址处。
 static int
 dir_lookup(struct File *dir, const char *name, struct File **file)
 {
@@ -185,6 +244,7 @@ dir_lookup(struct File *dir, const char *name, struct File **file)
 
 // Set *file to point at a free File structure in dir.  The caller is
 // responsible for filling in the File fields.
+//在dir目录文件的内容中寻找一个未被使用的File结构，将其地址保存到file的地址处。
 static int
 dir_alloc_file(struct File *dir, struct File **file)
 {
@@ -228,6 +288,11 @@ skip_slash(const char *p)
 // If we cannot find the file but find the directory
 // it should be in, set *pdir and copy the final path
 // element into lastelem.
+/**
+ * 解析路径path，填充pdir和pf地址处的File结构。比如/aa/bb/cc.c那么pdir指向代表bb目录的File结构，
+ * pf指向代表cc.c文件的File结构。又比如/aa/bb/cc.c，但是cc.c此时还不存在，
+ * 那么pdir依旧指向代表bb目录的File结构，但是pf地址处应该为0，lastelem指向的字符串应该是cc.c。
+ */
 static int
 walk_path(const char *path, struct File **pdir, struct File **pf, char *lastelem)
 {
@@ -284,6 +349,7 @@ walk_path(const char *path, struct File **pdir, struct File **pf, char *lastelem
 
 // Create "path".  On success set *pf to point at the file and return 0.
 // On error return < 0.
+//创建path，如果创建成功pf指向新创建的File指针。
 int
 file_create(const char *path, struct File **pf)
 {
@@ -306,6 +372,7 @@ file_create(const char *path, struct File **pf)
 
 // Open "path".  On success set *pf to point at the file and return 0.
 // On error return < 0.
+//找path对应的File结构地址，保存到pf地址处。
 int
 file_open(const char *path, struct File **pf)
 {
@@ -315,6 +382,7 @@ file_open(const char *path, struct File **pf)
 // Read count bytes from f into buf, starting from seek position
 // offset.  This meant to mimic the standard pread function.
 // Returns the number of bytes read, < 0 on error.
+//从文件f中的offset字节处读取count字节到buf处。
 ssize_t
 file_read(struct File *f, void *buf, size_t count, off_t offset)
 {
@@ -344,6 +412,7 @@ file_read(struct File *f, void *buf, size_t count, off_t offset)
 // offset.  This is meant to mimic the standard pwrite function.
 // Extends the file if necessary.
 // Returns the number of bytes written, < 0 on error.
+//将buf处的count字节写到文件f的offset开始的位置。
 int
 file_write(struct File *f, const void *buf, size_t count, off_t offset)
 {

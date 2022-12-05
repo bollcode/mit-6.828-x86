@@ -661,7 +661,7 @@ tlb_invalidate(pde_t *pgdir, void *va)
 // location.  Return the base of the reserved region.  size does *not*
 // have to be multiple of PGSIZE.
 //LAPIC开始于物理地址的0xfe000000处，而我们现阶段内核映射到了物理地址0到256M处，需要将虚拟地址MMIOBASE映射到这里
-//参数pa代表的是LAPIC处的物理地址
+//参数pa代表的是LAPIC处的物理地址（0xFE000000）4GB下的32M空间
 void *
 mmio_map_region(physaddr_t pa, size_t size)
 {
